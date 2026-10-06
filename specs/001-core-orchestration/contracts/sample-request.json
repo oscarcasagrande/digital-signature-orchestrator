@@ -1,0 +1,9 @@
+{
+  "externalId": "CONTRACT-928182",
+  "document": { "fileName": "contrato.pdf", "source": { "type": "URL", "url": "http://sample-docs/contrato.pdf" } },
+  "signers": [ { "externalId": "customer-123", "name": "Joao Silva", "document": "12345678909" } ],
+  "identityProofing": { "validations": [ { "type": "FACE_MATCH", "required": true }, { "type": "LIVENESS", "required": true } ] },
+  "signature": { "type": "ADVANCED" },
+  "callback": { "url": "http://callback-sink:8080/hook" },
+  "output": { "destination": { "type": "URL", "url": "https://cliente.exemplo.com/documents" } }
+}

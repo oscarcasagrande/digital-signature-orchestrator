@@ -1,0 +1,158 @@
+name: digital-signature
+x-app-env: &app-env
+  ConnectionStrings__Postgres: Host=postgres;Database=orchestrator;Username=orchestrator;Password=orchestrator
+  S3__Endpoint: http://minio:9000
+  S3__AccessKey: minioadmin
+  S3__SecretKey: minioadmin123
+  S3__Bucket: signature-artifacts
+  Artifacts__PublicBaseUrl: http://localhost:8080
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  OTEL_METRIC_EXPORT_INTERVAL: "5000"
+  # Development-only signing key; override with a secret in any real environment.
+  Artifacts__SigningKey: dev-compose-signing-key-change-me-0123456789
+  # Short retry schedule for local demos (production default is the PRD schedule: 0, 5s, 30s, 2min, 10min, 30min, 2h, 6h).
+  # Development only: callbacks may use plain HTTP and private addresses (the sink runs in the compose network).
+  Callbacks__AllowHttp: "true"
+  Callbacks__AllowPrivateNetworks: "true"
+  Callbacks__DefaultSecret: demo-secret-0123456789
+  # Reconciliation: short schedule for local demos (defaults: every 60 s, stale after 120 s).
+  Reconciliation__IntervalSeconds: "10"
+  Reconciliation__StaleAfterSeconds: "20"
+  Retry__Default__MaxAttempts: "4"
+  Retry__Default__DelaysSeconds__0: "0"
+  Retry__Default__DelaysSeconds__1: "1"
+  Retry__Default__DelaysSeconds__2: "1"
+  Retry__Default__DelaysSeconds__3: "1"
+  # Real providers (spec 011): values come from the git-ignored .env next to this file (see .env.example); empty = not configured.
+  # The simulated provider stays the default. Inside the containers use DOCUSIGN_PRIVATE_KEY (a key FILE path would be a host path).
+  Provider__Default: ${Provider__Default:-Simulated}
+  DOCUSIGN_INTEGRATION_KEY: ${DOCUSIGN_INTEGRATION_KEY:-}
+  DOCUSIGN_USER_ID: ${DOCUSIGN_USER_ID:-}
+  DOCUSIGN_ACCOUNT_ID: ${DOCUSIGN_ACCOUNT_ID:-}
+  DOCUSIGN_PRIVATE_KEY: ${DOCUSIGN_PRIVATE_KEY:-}
+  DOCUSIGN_BASE_URI: ${DOCUSIGN_BASE_URI:-}
+  DOCUSIGN_AUTH_SERVER: ${DOCUSIGN_AUTH_SERVER:-}
+  DOCUSIGN_CONNECT_HMAC_KEY: ${DOCUSIGN_CONNECT_HMAC_KEY:-}
+  LACUNA_API_KEY: ${LACUNA_API_KEY:-}
+  LACUNA_BASE_URI: ${LACUNA_BASE_URI:-}
+  LACUNA_WEBHOOK_SECRET: ${LACUNA_WEBHOOK_SECRET:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: orchestrator
+      POSTGRES_USER: orchestrator
+      POSTGRES_PASSWORD: orchestrator
+    ports: ["5433:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orchestrator -d orchestrator"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports: ["5672:5672", "15672:15672"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Official minio/minio images are no longer published to public registries; this is a MinIO server build.
+  minio:
+    image: bitnamilegacy/minio:2025.5.24
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [miniodata:/bitnami/minio/data]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9000/minio/health/live || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  minio-init:
+    image: bitnamilegacy/minio-client:latest
+    depends_on:
+      minio: { condition: service_healthy }
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - mc alias set local http://minio:9000 minioadmin minioadmin123 && mc mb --ignore-existing local/signature-artifacts
+    restart: "no"
+
+  # Serves a sample source document for local runs and the smoke test.
+  sample-docs:
+    image: nginx:alpine
+    volumes: ["./deploy/sample-docs:/usr/share/nginx/html:ro"]
+
+  # Example callback receiver: verifies signatures and lists received events at http://localhost:8081/events
+  callback-sink:
+    build: { context: ., dockerfile: deploy/Sink.Dockerfile }
+    environment:
+      SINK_SECRET: demo-secret-0123456789
+    ports: ["8081:8080"]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    command: start-dev --import-realm
+    environment:
+      # Development only: demo admin and realm with demo users and secrets (deploy/keycloak/realm-orchestrator.json).
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+    volumes:
+      - ./deploy/keycloak/realm-orchestrator.json:/opt/keycloak/data/import/realm-orchestrator.json:ro
+    ports: ["8180:8080"]
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.104.0
+    command: ["--config=/etc/otelcol/collector.yaml"]
+    volumes:
+      - ./deploy/otel/collector.yaml:/etc/otelcol/collector.yaml:ro
+    ports: ["8889:8889"]
+
+  api:
+    build: { context: ., dockerfile: deploy/Api.Dockerfile }
+    environment:
+      <<: *app-env
+      Auth__Enabled: "true"
+      Auth__Authority: http://keycloak:8080/realms/orchestrator
+      Auth__ValidIssuer: http://localhost:8180/realms/orchestrator
+      Auth__Audience: orchestrator-api
+      Confirmation__ExposeSink: "true"   # development only: lets the smoke test read codes of the simulated notifier
+    ports: ["8080:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_healthy }
+
+  worker:
+    build: { context: ., dockerfile: deploy/Worker.Dockerfile }
+    environment:
+      <<: *app-env
+      RabbitMq__Host: rabbitmq
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      sample-docs: { condition: service_started }
+      callback-sink: { condition: service_started }
+      api: { condition: service_started }
+    restart: on-failure
+
+
+  portal:
+    build: { context: ./portal }
+    ports: ["3000:80"]
+    depends_on:
+      api: { condition: service_started }
+      keycloak: { condition: service_started }
+
+volumes:
+  pgdata:
+  miniodata:

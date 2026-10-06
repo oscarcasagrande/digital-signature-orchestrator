@@ -1,0 +1,108 @@
+openapi: 3.0.3
+info: { title: Signature Orchestrator API - callbacks, version: "1.0" }
+paths:
+  /v1/callbacks:
+    post:
+      summary: Registra um destino de callback (o segredo é retornado somente aqui)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [callbackId, url]
+              properties:
+                callbackId: { type: string, pattern: '^[A-Za-z0-9_.-]+$', maxLength: 100 }
+                url: { type: string, format: uri }
+                secret: { type: string, minLength: 16, maxLength: 200, description: "opcional; gerado quando ausente" }
+                description: { type: string, maxLength: 300 }
+      responses:
+        "201":
+          description: criado
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CallbackRegistration'
+                  - type: object
+                    properties: { secret: { type: string } }
+        "400": { description: validação (URL bloqueada pela política, id inválido) }
+        "409": { description: callbackId já existe }
+    get:
+      summary: Lista destinos (sem segredo)
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CallbackRegistration' }
+  /v1/callbacks/{callbackId}:
+    get:
+      summary: Consulta um destino (sem segredo)
+      responses: { "200": { description: ok }, "404": { description: inexistente } }
+    delete:
+      summary: Desativa o destino (preserva histórico)
+      responses: { "204": { description: desativado }, "404": { description: inexistente } }
+  /v1/signature-processes/{id}/callbacks:
+    get:
+      summary: Entregas de callback do processo
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CallbackDelivery' }
+        "404": { description: processo inexistente }
+components:
+  schemas:
+    CallbackRegistration:
+      type: object
+      properties:
+        callbackId: { type: string }
+        url: { type: string }
+        active: { type: boolean }
+        description: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CallbackDelivery:
+      type: object
+      properties:
+        deliveryId: { type: string }
+        operationId: { type: string }
+        eventId: { type: string }
+        eventType: { type: string }
+        processStatus: { type: string }
+        destination: { type: string }
+        status: { type: string, enum: [PENDING, RETRY_PENDING, DELIVERED, FAILED, DLQ] }
+        attempts: { type: integer }
+        lastStatusCode: { type: integer, nullable: true }
+        lastError: { type: string, nullable: true }
+        occurredAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        deliveredAt: { type: string, format: date-time, nullable: true }
+    OutboundCallbackRequest:
+      description: Requisição enviada pela plataforma ao destino
+      type: object
+      properties:
+        eventId: { type: string }
+        eventType: { type: string, example: SIGNATURE_PROCESS.COMPLETED }
+        processId: { type: string }
+        externalId: { type: string }
+        status: { type: string }
+        occurredAt: { type: string, format: date-time }
+        document:
+          type: object
+          description: somente em COMPLETED
+          properties:
+            id: { type: string }
+            downloadUrl: { type: string }

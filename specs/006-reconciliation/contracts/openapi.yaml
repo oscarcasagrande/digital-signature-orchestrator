@@ -1,0 +1,53 @@
+openapi: 3.0.3
+info: { title: Signature Orchestrator API - reconciliation, version: "1.0" }
+paths:
+  /v1/signature-processes/{id}/reconcile:
+    post:
+      summary: Reconcilia o processo com o provider (ação manual)
+      responses:
+        "200":
+          description: resultado da reconciliação
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReconcileResult' }
+        "404": { description: processo inexistente }
+        "409": { description: processo em estado terminal }
+  /v1/signature-processes/{id}/reconciliations:
+    get:
+      summary: Histórico de reconciliações (divergências corrigidas e ações manuais)
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ReconciliationRecord' }
+        "404": { description: processo inexistente }
+components:
+  schemas:
+    ReconcileResult:
+      type: object
+      properties:
+        processId: { type: string }
+        outcome: { type: string, enum: [CORRECTED, CONSISTENT, NOT_APPLICABLE, PROVIDER_ERROR] }
+        internalStatus: { type: string }
+        providerStatus: { type: string, nullable: true }
+        corrected: { type: boolean }
+        resultingStatus: { type: string, nullable: true }
+        error: { type: string, nullable: true }
+    ReconciliationRecord:
+      type: object
+      properties:
+        reconciliationId: { type: string }
+        processId: { type: string }
+        trigger: { type: string, enum: [SCHEDULED, MANUAL] }
+        internalStatus: { type: string }
+        providerStatus: { type: string, nullable: true }
+        outcome: { type: string }
+        resultingStatus: { type: string, nullable: true }
+        details: { type: object }
+        createdAt: { type: string, format: date-time }

@@ -1,0 +1,63 @@
+openapi: 3.0.3
+info: { title: Signature Orchestrator API - artifacts, version: "1.0" }
+paths:
+  /v1/signature-processes/{id}/artifacts:
+    get:
+      summary: Lista artefatos do processo (sem chaves internas)
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Artifact' }
+        "404": { description: processo inexistente }
+  /v1/signature-processes/{id}/download-link:
+    post:
+      summary: Emite URL temporária assinada para um único artefato
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                artifactId: { type: string }
+                type: { type: string, enum: [ORIGINAL_DOCUMENT, SIGNED_DOCUMENT, EVIDENCE] }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string }
+                  expiresAt: { type: string, format: date-time }
+        "404": { description: processo ou artefato inexistente }
+  /v1/downloads/{artifactId}:
+    get:
+      summary: Download do conteúdo (autorizado pela assinatura da URL)
+      parameters:
+        - { name: expires, in: query, required: true, schema: { type: integer, format: int64 } }
+        - { name: sig, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: conteúdo; cabeçalhos Content-Type, Content-Length, X-Content-SHA256 }
+        "403": { description: assinatura inválida ou artefato diferente }
+        "410": { description: link expirado }
+components:
+  schemas:
+    Artifact:
+      type: object
+      properties:
+        artifactId: { type: string }
+        type: { type: string }
+        contentType: { type: string }
+        sha256: { type: string }
+        size: { type: integer, format: int64 }
+        fileName: { type: string }
+        createdAt: { type: string, format: date-time }

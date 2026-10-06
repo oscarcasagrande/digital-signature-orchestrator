@@ -1,0 +1,38 @@
+openapi: 3.0.3
+info: { title: Signature Orchestrator API, version: "1.0" }
+paths:
+  /v1/signature-processes:
+    post:
+      summary: Cria processo de assinatura
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 128 } }
+        - { name: X-Correlation-Id, in: header, required: false, schema: { type: string } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateProcess' } } } }
+      responses:
+        "202": { description: Criado }
+        "200": { description: Replay idempotente }
+        "400": { description: Validação (problem+json) }
+        "409": { description: Mesma chave com payload diferente }
+  /v1/signature-processes/{id}:
+    get: { summary: Consulta processo, responses: { "200": { description: ok }, "404": { description: não encontrado } } }
+  /v1/signature-processes/{id}/status:
+    get: { summary: Status de negócio e operacional, responses: { "200": { description: ok } } }
+  /v1/signature-processes/{id}/operations:
+    get: { summary: Lista operações (page, pageSize), responses: { "200": { description: ok } } }
+  /v1/signature-processes/{id}/events:
+    get: { summary: Journal (page, pageSize), responses: { "200": { description: ok } } }
+  /v1/signature-processes/{id}/cancel:
+    post: { summary: Cancela processo, responses: { "200": { description: cancelado ou idempotente }, "409": { description: estado terminal } } }
+components:
+  schemas:
+    CreateProcess:
+      type: object
+      required: [externalId, document, signers, signature]
+      properties:
+        externalId: { type: string }
+        document: { type: object }
+        signers: { type: array, minItems: 1, items: { type: object } }
+        identityProofing: { type: object }
+        signature: { type: object, properties: { type: { type: string, enum: [SIMPLE, ADVANCED, QUALIFIED] } } }
+        callback: { type: object }
+        output: { type: object }

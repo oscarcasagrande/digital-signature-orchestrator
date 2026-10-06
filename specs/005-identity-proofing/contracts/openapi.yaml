@@ -1,0 +1,125 @@
+openapi: 3.0.3
+info: { title: Signature Orchestrator API - identity proofing, version: "1.0" }
+paths:
+  /v1/proofing-sessions:
+    post:
+      summary: Abre uma sessão de proofing
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSession' }
+      responses:
+        "202": { description: criada }
+        "200": { description: replay idempotente }
+        "400": { description: validação }
+        "409": { description: mesma chave com conteúdo diferente }
+  /v1/proofing-sessions/{id}:
+    get:
+      summary: Sessão, estados e evidências recebidas (sem conteúdo)
+      responses: { "200": { description: ok }, "404": { description: inexistente } }
+  /v1/proofing-sessions/{id}/documents:
+    post:
+      summary: Envia frente ou verso do documento
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Evidence' }
+      responses:
+        "202": { description: recebida }
+        "400": { description: validação (tipo, base64, tamanho) }
+        "404": { description: sessão inexistente }
+        "409": { description: evidência desse tipo já enviada }
+  /v1/proofing-sessions/{id}/biometrics:
+    post:
+      summary: Envia a selfie
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Evidence' }
+      responses: { "202": { description: recebida }, "400": { description: validação }, "404": { description: inexistente }, "409": { description: já enviada } }
+  /v1/proofing-sessions/{id}/result:
+    get:
+      summary: Resultado agregado e por validação
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Result' }
+        "404": { description: inexistente }
+  /v1/proofing-sessions/{id}/events:
+    get:
+      summary: Journal da sessão (page, pageSize)
+      responses: { "200": { description: ok }, "404": { description: inexistente } }
+  /v1/proofing-sessions/{id}/retry:
+    post:
+      summary: Reexecuta validação em ERROR, DLQ ou RETRY_PENDING
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                operationId: { type: string }
+                reason: { type: string, maxLength: 500 }
+      responses: { "200": { description: reenfileirada }, "404": { description: inexistente }, "409": { description: nada a reprocessar } }
+  /v1/proofing-sessions/{id}/evidence:
+    delete:
+      summary: Exclui as evidências de uma sessão concluída
+      responses: { "204": { description: excluídas }, "404": { description: inexistente }, "409": { description: sessão não concluída } }
+components:
+  schemas:
+    CreateSession:
+      type: object
+      required: [externalId, subject, validations]
+      properties:
+        externalId: { type: string, maxLength: 200 }
+        subject:
+          type: object
+          required: [name, document]
+          properties:
+            name: { type: string, maxLength: 300 }
+            document: { type: string, description: CPF com 11 dígitos }
+            phone: { type: string }
+            email: { type: string }
+            deviceId: { type: string, maxLength: 100 }
+        validations:
+          type: array
+          minItems: 1
+          items:
+            oneOf:
+              - type: string
+              - type: object
+                properties:
+                  type: { type: string }
+                  required: { type: boolean, default: true }
+    Evidence:
+      type: object
+      required: [type, contentType, content]
+      properties:
+        type: { type: string, enum: [DOCUMENT_FRONT, DOCUMENT_BACK, SELFIE] }
+        contentType: { type: string, enum: [image/jpeg, image/png] }
+        content: { type: string, format: byte, description: conteúdo em base64 }
+    Result:
+      type: object
+      properties:
+        sessionId: { type: string }
+        status: { type: string }
+        result: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        validations:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string }
+              required: { type: boolean }
+              status: { type: string }
+              score: { type: number, nullable: true }
+              details: { type: object }
+              completedAt: { type: string, format: date-time, nullable: true }

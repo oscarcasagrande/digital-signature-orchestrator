@@ -1,0 +1,67 @@
+openapi: 3.0.3
+info: { title: Signature Orchestrator API - resilience, version: "1.0" }
+paths:
+  /v1/signature-processes/{id}/retry:
+    post:
+      summary: Reprocessa a partir da operação que falhou (ou da indicada), sem reiniciar o processo
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                operationId: { type: string }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: operação recolocada para execução
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  processId: { type: string }
+                  operationId: { type: string }
+                  operationType: { type: string }
+                  operationalStatus: { type: string }
+        "404": { description: processo ou operação inexistente (ou de outro processo) }
+        "409": { description: processo terminal ou sem operação reprocessável }
+  /v1/dead-letters:
+    get:
+      summary: Lista operações em DLQ
+      parameters:
+        - { name: domain, in: query, required: false, schema: { type: string, enum: [signature-provider, artifact, identity-proofing, callback] } }
+        - { name: resolved, in: query, required: false, schema: { type: boolean, default: false } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, default: 50 } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/DeadLetter' }
+                  page: { type: integer }
+                  pageSize: { type: integer }
+                  total: { type: integer }
+components:
+  schemas:
+    DeadLetter:
+      type: object
+      properties:
+        deadLetterId: { type: string }
+        processId: { type: string }
+        operationId: { type: string }
+        operationType: { type: string }
+        domain: { type: string }
+        queue: { type: string }
+        errorClass: { type: string }
+        reason: { type: string }
+        attempts: { type: integer }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time, nullable: true }

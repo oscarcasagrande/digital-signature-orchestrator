@@ -1,0 +1,11 @@
+# Research — 002
+
+- **Decision**: AWSSDK.S3 com `ForcePathStyle=true` e `ServiceURL` configurável. **Rationale**: API S3 mantém o armazenamento trocável (constitution). **Alt.**: Minio .NET SDK (acopla a MinIO).
+- **Decision**: Hash por streaming: o conteúdo é lido uma vez para um arquivo temporário/MemoryStream com limite, calculando SHA-256 e tamanho; depois gravado com `PutObject`. **Rationale**: o hash corresponde ao que foi gravado; limite de 50 MB torna buffer em disco/memória aceitável. **Alt.**: multipart streaming sem buffer (complexidade desnecessária no MVP).
+- **Decision**: Objeto é gravado antes do registro em `artifact` (que entra no SaveChanges da transação do workflow). Falha após o upload deixa órfão, nunca registro sem objeto (FR-013). Chave determinística por tipo ⇒ reexecução sobrescreve o mesmo objeto (idempotente).
+- **Decision**: Link assinado: `sig = HMAC-SHA256(key, "{artifactId}.{expiresUnix}")` em Base64Url; URL `{base}/v1/downloads/{artifactId}?expires=..&sig=..`; comparação com `CryptographicOperations.FixedTimeEquals`; chave `Artifacts:SigningKey` (config; dev default, não é segredo real). **Alt.**: presigned URL S3 (expõe endpoint/chave do objeto e credenciais derivadas — rejeitado pela constitution).
+- **Decision**: Endpoint de download faz stream via API (autoriza pela assinatura), cabeçalhos `Content-Type`, `Content-Length`, `X-Content-SHA256`; journal `DOCUMENT_DOWNLOADED`.
+- **Decision**: Documento de origem via `HttpClient` tipado (`IDocumentFetcher`), timeout 30 s, leitura limitada a 50 MB (aborta ao exceder), apenas http/https; status 4xx/5xx → `ProviderException`-like `DocumentFetchException` (marcada transitória para 5xx/timeout para a spec 003 usar; sem retry aqui).
+- **Decision**: Provider simulado gera o assinado (`original + "\n--- SIGNED BY SIMULATED PROVIDER ---\n" + signers`) e evidência JSON determinísticos. O original é lido do store pelo engine e passado ao adapter.
+- **Decision**: Bucket criado no startup (`EnsureBucket`) pela API e pelo worker; compose adiciona `minio` + `minio-init` (mc) por robustez.
+- **Decision**: Testcontainers.Minio para integração; origem do documento = Kestrel local em porta livre dentro do processo de teste.
