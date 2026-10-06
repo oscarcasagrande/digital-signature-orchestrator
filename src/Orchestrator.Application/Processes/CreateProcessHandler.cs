@@ -38,9 +38,12 @@ public sealed class CreateProcessHandler(
             ? [] : CreateProcessValidator.Validate(root)).ToList();
         if (errors.Count > 0) throw new ValidationException(errors);
 
-        // Idempotency keys are per client: the same key from two clients never collides.
-        if (caller?.ClientId is { } clientId)
-            idempotencyKey = "c:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(clientId + "|" + idempotencyKey)))[..40].ToLowerInvariant();
+        // Idempotency keys are scoped to who calls: per client for machine clients, per user for people (operators/admins in the
+        // portal), so the same key from two callers never collides or replays someone else's process.
+        static string Scope(string prefix, string who, string key) =>
+            prefix + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(who + "|" + key)))[..40].ToLowerInvariant();
+        if (caller?.ClientId is { } clientId) idempotencyKey = Scope("c:", clientId, idempotencyKey!);
+        else if (caller is { Authenticated: true } person) idempotencyKey = Scope("u:", person.UserId, idempotencyKey!);
 
         var hash = CreateProcessValidator.Hash(root);
         var now = clock.UtcNow;

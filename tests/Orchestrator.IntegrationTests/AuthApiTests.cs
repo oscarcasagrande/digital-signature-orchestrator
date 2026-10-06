@@ -46,7 +46,9 @@ public class RbacUnitTests
     [InlineData("GET", "/v1/signature-processes", "viewer", true)]
     [InlineData("GET", "/v1/signature-processes/sig_1/provider", "viewer", false)]
     [InlineData("GET", "/v1/signature-processes/sig_1/provider", "operator", true)]
-    [InlineData("POST", "/v1/signature-processes", "operator", false)]
+    [InlineData("POST", "/v1/signature-processes", "operator", true)]
+    [InlineData("POST", "/v1/signature-processes", "admin", true)]
+    [InlineData("POST", "/v1/signature-processes", "viewer", false)]
     [InlineData("POST", "/v1/signature-processes", "client", true)]
     [InlineData("POST", "/v1/signature-processes/sig_1/cancel", "viewer", false)]
     [InlineData("POST", "/v1/signature-processes/sig_1/cancel", "operator", true)]
@@ -56,7 +58,9 @@ public class RbacUnitTests
     [InlineData("POST", "/v1/proofing-sessions", "operator", false)]
     [InlineData("POST", "/v1/proofing-sessions/pro_1/retry", "operator", true)]
     [InlineData("DELETE", "/v1/proofing-sessions/pro_1/evidence", "viewer", false)]
-    [InlineData("POST", "/v1/document-uploads", "operator", false)]
+    [InlineData("POST", "/v1/document-uploads", "operator", true)]
+    [InlineData("POST", "/v1/document-uploads", "admin", true)]
+    [InlineData("POST", "/v1/document-uploads", "viewer", false)]
     [InlineData("POST", "/v1/document-uploads", "client", true)]
     [InlineData("GET", "/v1/dev/confirmation-codes/sig_1", "client", false)]
     [InlineData("GET", "/v1/dev/confirmation-codes/sig_1", "admin", true)]
@@ -170,17 +174,6 @@ public class AuthApiTests(TestFixture f)
         var created = items.First(e => e.GetProperty("type").GetString() == "PROCESS_CREATED").GetProperty("actor");
         created.GetProperty("type").GetString().Should().Be("CONSUMER");
         created.GetProperty("id").GetString().Should().Be("svc");
-    }
-
-    [Fact]
-    public async Task Operator_cannot_create_processes_but_admin_can()
-    {
-        using var api = f.CreateAuthClient();
-        var body = TestFixture.Payload("AUTH-ROLE-" + Guid.NewGuid().ToString("N")[..6]);
-        (await api.SendAsync(Tokens.Req(HttpMethod.Post, "/v1/signature-processes", Tokens.Make("olga", Operator), body, Guid.NewGuid().ToString())))
-            .StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await api.SendAsync(Tokens.Req(HttpMethod.Post, "/v1/signature-processes", Tokens.Make("root", Admin), body, Guid.NewGuid().ToString())))
-            .StatusCode.Should().Be(HttpStatusCode.Accepted);
     }
 
     [Fact]

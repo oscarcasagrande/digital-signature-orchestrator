@@ -250,7 +250,6 @@ command curl -s "$BASE/v1/signature-processes?pageSize=200" -H "Authorization: B
 command curl -s "$BASE/v1/signature-processes?pageSize=200" -H "Authorization: Bearer $TOKEN_OPERATOR" | grep -q "$IDA" || fail "operator must see all clients"
 [ "$(code -X POST "$BASE/v1/signature-processes/$IDA/cancel" -H "Authorization: Bearer $TOKEN_VIEWER")" = "403" ] || fail "viewer cancel expected 403"
 [ "$(code "$BASE/v1/signature-processes/$IDA" -H "Authorization: Bearer $TOKEN_VIEWER")" = "200" ] || fail "viewer must read"
-[ "$(code -X POST "$BASE/v1/signature-processes" -H "Authorization: Bearer $TOKEN_OPERATOR" -H "Idempotency-Key: smoke-op-$RANDOM" -H "Content-Type: application/json" --data @"$SAMPLE")" = "403" ] || fail "operator create expected 403"
 [ "$(code -X POST "$BASE/v1/signature-processes/$IDA/cancel" -H "Authorization: Bearer $TOKEN_OPERATOR")" = "200" ] || fail "operator cancel expected 200"
 command curl -s "$BASE/v1/signature-processes/$IDA/events?pageSize=200" -H "Authorization: Bearer $TOKEN_OPERATOR" | grep -q '"id":"operator"' || fail "cancel not audited with the operator identity"
 PROXY="${PORTAL_URL:-http://localhost:3000}/realms/orchestrator/protocol/openid-connect/token"
@@ -259,6 +258,39 @@ PROXY="${PORTAL_URL:-http://localhost:3000}/realms/orchestrator/protocol/openid-
 AUTH="${KEYCLOAK_URL:-http://localhost:8180}/realms/orchestrator/protocol/openid-connect/auth?client_id=portal&response_type=code&scope=openid&redirect_uri=http://localhost:3000/auth/callback&state=s"
 [ "$(code "$AUTH&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256")" = "200" ] || fail "authorization code request with PKCE expected 200"
 [ "$(code "$AUTH")" != "200" ] || fail "authorization request without PKCE must be refused"
+
+echo "== portal path: operator and admin upload a document and create a process; viewer cannot "
+printf '%%PDF-1.4\nportal path document\n' > .smoke-portal.pdf  # relative path: native curl on Windows cannot read /tmp
+up_as() { command curl -s -X POST "$BASE/v1/document-uploads" -H "Authorization: Bearer $1" -F "file=@.smoke-portal.pdf;type=application/pdf"; }
+UPO=$(up_as "$TOKEN_OPERATOR" | field uploadId)
+[ -n "$UPO" ] || fail "operator upload (portal path) failed"
+[ "$(command curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/v1/document-uploads" -H "Authorization: Bearer $TOKEN_VIEWER" -F "file=@.smoke-portal.pdf;type=application/pdf")" = "403" ] || fail "viewer upload expected 403"
+PORTAL_BODY() { echo '{"externalId":"SMOKE-PORTAL-'$RANDOM'","document":{"fileName":"portal.pdf","source":{"type":"UPLOAD","uploadId":"'$1'"}},"defaults":{"signatureType":"ADVANCED"},"signers":[{"name":"Maria Souza","document":"12345678909","email":"maria@example.com"}]}'; }
+PO=$(command curl -s -X POST "$BASE/v1/signature-processes" -H "Authorization: Bearer $TOKEN_OPERATOR" -H "Idempotency-Key: smoke-portal-$RANDOM-$(date +%s)" -H "Content-Type: application/json" --data "$(PORTAL_BODY "$UPO")" | field processId)
+[ -n "$PO" ] || fail "operator could not create a process through the portal path"
+[ "$(code -X POST "$BASE/v1/signature-processes" -H "Authorization: Bearer $TOKEN_VIEWER" -H "Idempotency-Key: smoke-vw-$RANDOM" -H "Content-Type: application/json" --data "$(PORTAL_BODY "$UPO")")" = "403" ] || fail "viewer create expected 403"
+UPA=$(up_as "$TOKEN_ADMIN" | field uploadId)
+[ -n "$UPA" ] || fail "admin upload failed"
+[ "$(code -X POST "$BASE/v1/signature-processes" -H "Authorization: Bearer $TOKEN_ADMIN" -H "Idempotency-Key: smoke-adm-$RANDOM-$(date +%s)" -H "Content-Type: application/json" --data "$(PORTAL_BODY "$UPA")")" = "202" ] || fail "admin create expected 202"
+rm -f .smoke-portal.pdf
+command curl -s "$BASE/v1/signature-processes/$PO/events?pageSize=200" -H "Authorization: Bearer $TOKEN_OPERATOR" | grep -q -E '"type":"PROCESS_CREATED","timestamp":"[^"]*","actor":{"type":"OPERATOR","id":"operator"}' || fail "PROCESS_CREATED must record the operator as the actor"
+[ "$(code "$BASE/v1/signature-processes/$PO" -H "Authorization: Bearer $TOKEN_A")" = "404" ] || fail "an API client must not see a process created by a person"
+command curl -s "$BASE/v1/signature-processes?pageSize=200" -H "Authorization: Bearer $TOKEN_A" | grep -q "$PO" && fail "the client list must not include the person-created process"
+for i in $(seq 1 60); do
+  [ "$(command curl -s "$BASE/v1/signature-processes/$PO/status" -H "Authorization: Bearer $TOKEN_OPERATOR" | field businessStatus)" = "COMPLETED" ] && break
+  sleep 1
+  [ "$i" = 60 ] && fail "the process created through the portal path did not complete"
+done
+
+echo "== access tokens can be renewed with the refresh token (what the portal does before they expire)"
+LOGIN=$(command curl -s -X POST "$KC" -d grant_type=password -d client_id=orchestrator-cli -d username=operator -d password=operator)
+RT=$(echo "$LOGIN" | sed -n 's/.*"refresh_token":"\([^"]*\)".*/\1/p')
+[ -n "$RT" ] || fail "the identity provider issued no refresh token"
+RENEWED=$(command curl -s -X POST "$KC" -d grant_type=refresh_token -d client_id=orchestrator-cli -d "refresh_token=$RT")
+NT=$(echo "$RENEWED" | token_of)
+[ -n "$NT" ] || fail "refresh_token grant failed: $RENEWED"
+[ "$(code "$BASE/v1/signature-processes?pageSize=1" -H "Authorization: Bearer $NT")" = "200" ] || fail "the renewed token must work against the API"
+echo "access token lifetime: $(echo "$LOGIN" | grep -o '"expires_in":[0-9]*' | cut -d: -f2)s; refresh token lifetime: $(echo "$LOGIN" | grep -o '"refresh_expires_in":[0-9]*' | cut -d: -f2)s"
 
 echo "== security hardening: proofing sessions and callbacks per client, Postgres on 5433 (spec 009)"
 PS=$(command curl -s -X POST "$BASE/v1/proofing-sessions" -H "Authorization: Bearer $TOKEN_A" -H "Idempotency-Key: smoke-ps-$RANDOM-$(date +%s)" -H "Content-Type: application/json" \

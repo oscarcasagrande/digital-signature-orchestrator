@@ -3,7 +3,11 @@ export interface Session {
   token: string;
   username: string;
   roles: string[];
+  /** Access token expiry (epoch seconds). */
   expiresAt: number;
+  /** Refresh token (kept in sessionStorage like the access token) and its expiry (epoch seconds), when the IdP issued one. */
+  refreshToken?: string;
+  refreshExpiresAt?: number;
 }
 
 export const SESSION_KEY = 'session';
@@ -12,6 +16,10 @@ export const CLIENT_ID = 'portal';
 export const CALLBACK_PATH = '/auth/callback';
 export const PKCE_KEY = 'pkce';
 export const OPERATE_ROLES = ['operator', 'admin'];
+/** Roles allowed to upload a document and start a process (viewers can only read). */
+export const CREATE_ROLES = ['client', 'operator', 'admin'];
+/** The access token is renewed when it has less than this left. */
+export const REFRESH_SKEW_SECONDS = 30;
 
 let handler: (() => void) | null = null;
 
@@ -39,12 +47,18 @@ export function decodeToken(token: string): { username: string; roles: string[];
   }
 }
 
+/**
+ * The stored session, or null when there is none or nothing in it can still be used: an expired access token is kept while
+ * a refresh token that has not expired can renew it.
+ */
 export function loadSession(): Session | null {
   try {
     const raw = sessionStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const s = JSON.parse(raw) as Session;
-    if (!s.token || s.expiresAt * 1000 < Date.now()) {
+    const accessValid = s.expiresAt * 1000 > Date.now();
+    const refreshValid = !!s.refreshToken && (s.refreshExpiresAt === undefined || s.refreshExpiresAt * 1000 > Date.now());
+    if (!s.token || (!accessValid && !refreshValid)) {
       sessionStorage.removeItem(SESSION_KEY);
       return null;
     }
@@ -63,8 +77,88 @@ export function saveSession(s: Session | null) {
   }
 }
 
+/** Current access token as stored (it may be about to expire; use <see cref="validToken"/> before calling the API). */
 export function getToken(): string | null {
   return loadSession()?.token ?? null;
+}
+
+let sessionListener: ((s: Session | null) => void) | null = null;
+
+/** Notified whenever the session is renewed or ended outside React (token refresh). */
+export function onSessionChange(fn: ((s: Session | null) => void) | null) {
+  sessionListener = fn;
+}
+
+function sessionFromTokenResponse(r: { access_token: string; refresh_token?: string; refresh_expires_in?: number }, previous?: Session): Session | null {
+  const claims = decodeToken(r.access_token);
+  if (!claims) return null;
+  const refreshToken = r.refresh_token ?? previous?.refreshToken;
+  return {
+    token: r.access_token,
+    username: claims.username,
+    roles: claims.roles,
+    expiresAt: claims.exp,
+    refreshToken,
+    refreshExpiresAt: r.refresh_token
+      ? r.refresh_expires_in ? Math.floor(Date.now() / 1000) + r.refresh_expires_in : undefined
+      : previous?.refreshExpiresAt,
+  };
+}
+
+function endSession() {
+  saveSession(null);
+  sessionListener?.(null);
+  notifyUnauthorized();
+}
+
+let refreshing: Promise<Session | null> | null = null;
+
+/**
+ * Renews the access token with the refresh token (one request at a time, shared by every caller). Resolves with the new session,
+ * or null when the session cannot be renewed (no refresh token, refresh token expired or revoked): in that case the session is
+ * ended and the user has to sign in again. A network or server failure rejects and keeps the session, so a later call can retry.
+ */
+export function refreshSession(): Promise<Session | null> {
+  refreshing ??= doRefresh().finally(() => {
+    refreshing = null;
+  });
+  return refreshing;
+}
+
+async function doRefresh(): Promise<Session | null> {
+  const current = loadSession();
+  if (!current?.refreshToken) {
+    endSession();
+    return null;
+  }
+  const body = new URLSearchParams({ grant_type: 'refresh_token', client_id: CLIENT_ID, refresh_token: current.refreshToken });
+  const res = await fetch(TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+  if (res.status === 400 || res.status === 401) {
+    endSession(); // invalid_grant: expired, revoked or reused refresh token
+    return null;
+  }
+  if (!res.ok) throw new Error(`The identity provider could not renew the session (HTTP ${res.status}).`);
+  const next = sessionFromTokenResponse(await res.json(), current);
+  if (!next) {
+    endSession();
+    return null;
+  }
+  saveSession(next);
+  sessionListener?.(next);
+  return next;
+}
+
+/** An access token good for at least REFRESH_SKEW_SECONDS, renewing it first when needed; null when there is no session. */
+export async function validToken(): Promise<string | null> {
+  const s = loadSession();
+  if (!s) return null;
+  if (s.expiresAt - Date.now() / 1000 > REFRESH_SKEW_SECONDS) return s.token;
+  if (!s.refreshToken) return s.token; // nothing to renew with: let the API decide (it answers 401 when expired)
+  try {
+    return (await refreshSession())?.token ?? null;
+  } catch {
+    return s.expiresAt * 1000 > Date.now() ? s.token : null; // IdP unreachable: use the old token while it still works
+  }
 }
 
 /** Browser-facing authorization endpoint (the identity provider origin; overridable with VITE_AUTH_URL). */
@@ -137,10 +231,11 @@ export async function completeLogin(
     throw new Error('The identity provider is unreachable.');
   }
   if (!res.ok) throw new Error(`Sign-in failed (HTTP ${res.status}).`);
-  const { access_token } = (await res.json()) as { access_token: string };
+  const tokens = (await res.json()) as { access_token: string; refresh_token?: string; refresh_expires_in?: number };
+  const access_token = tokens.access_token;
   const claims = decodeToken(access_token);
   if (!claims) throw new Error('The identity provider returned an invalid token.');
-  const session: Session = { token: access_token, username: claims.username, roles: claims.roles, expiresAt: claims.exp };
+  const session = sessionFromTokenResponse(tokens)!;
   saveSession(session);
   return { session, returnTo: saved.returnTo };
 }

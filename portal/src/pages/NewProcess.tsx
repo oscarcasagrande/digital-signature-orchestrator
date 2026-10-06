@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ApiError, api } from '../api/client';
 import type { NewProcessRequest, NewSigner } from '../api/types';
 import { errorNotice, Notice, type NoticeState } from '../components/Notice';
+import { useOperator } from '../components/OperatorContext';
 
 interface Row {
   key: number;
@@ -33,6 +34,7 @@ export function fieldErrors(errors: Record<string, string[]> | undefined, index:
 
 export function NewProcess() {
   const navigate = useNavigate();
+  const { canCreateProcess, session } = useOperator();
   const [externalId, setExternalId] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [signatureType, setSignatureType] = useState('ADVANCED');
@@ -107,6 +109,19 @@ export function NewProcess() {
   };
 
   const general = errors ? Object.entries(errors).filter(([k]) => !k.startsWith('signers[')) : [];
+
+  if (!canCreateProcess) {
+    return (
+      <section aria-labelledby="new-title">
+        <p><Link to="/">← Processos</Link></p>
+        <h1 id="new-title">Novo processo</h1>
+        <p role="alert" className="notice notice-error">
+          Seu perfil ({session?.roles.filter((r) => ['viewer', 'client', 'operator', 'admin'].includes(r)).join(', ') || 'sem papel'}) não permite iniciar processos.
+          Peça a um operador ou administrador.
+        </p>
+      </section>
+    );
+  }
 
   return (
     <section aria-labelledby="new-title">

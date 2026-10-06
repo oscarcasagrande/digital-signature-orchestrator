@@ -37,6 +37,8 @@ public static class Rbac
     private static readonly string[] Everyone = Roles.All;
     private static readonly string[] Operate = [Roles.Operator, Roles.Admin, Roles.Client];
     private static readonly string[] Create = [Roles.Client, Roles.Admin];
+    // Starting a process (and uploading its document) is also a human action in the portal: operators and admins may do it.
+    private static readonly string[] CreateProcess = [Roles.Client, Roles.Operator, Roles.Admin];
 
     public static string[] Required(string method, string path)
     {
@@ -44,9 +46,9 @@ public static class Rbac
         var read = HttpMethods.IsGet(method) || HttpMethods.IsHead(method);
         // Provider metadata is audited and therefore an operator action, even though it is a GET.
         if (path.StartsWith("/v1/dev/", StringComparison.OrdinalIgnoreCase)) return [Roles.Admin];
-        if (HttpMethods.IsPost(method) && path.Equals("/v1/document-uploads", StringComparison.OrdinalIgnoreCase)) return Create;
+        if (HttpMethods.IsPost(method) && path.Equals("/v1/document-uploads", StringComparison.OrdinalIgnoreCase)) return CreateProcess;
         if (read) return path.EndsWith("/provider", StringComparison.OrdinalIgnoreCase) ? Operate : Everyone;
-        if (HttpMethods.IsPost(method) && path.Equals("/v1/signature-processes", StringComparison.OrdinalIgnoreCase)) return Create;
+        if (HttpMethods.IsPost(method) && path.Equals("/v1/signature-processes", StringComparison.OrdinalIgnoreCase)) return CreateProcess;
         if (path.StartsWith("/v1/callbacks", StringComparison.OrdinalIgnoreCase)) return Create;
         if (path.StartsWith("/v1/proofing-sessions", StringComparison.OrdinalIgnoreCase))
         {

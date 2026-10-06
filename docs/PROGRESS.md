@@ -137,3 +137,22 @@ Verificação:
 | Smoke test contra `docker compose` | `SMOKE TEST PASSED` |
 
 **Não verificado**: nenhuma chamada foi feita aos sandboxes reais (sem credenciais no ambiente). Os mapeamentos HTTP vêm da documentação pública e foram testados só contra servidores falsos; os campos da Lacuna (upload, `flowActions`, nomes de status, `content?type=`) são os mais incertos. Rode `LiveProviderTests` com credenciais para validar. Limites: sem liberação por signatário nos providers reais; assinatura avançada/qualificada específica de cada fornecedor não é configurada; a Lacuna pode duplicar o documento remoto se a conexão cair entre a criação remota e o commit local.
+
+---
+
+# Correção: criação de processos por pessoas e renovação do token
+
+Problema reproduzido no `docker compose`: com token de `operator`, `POST /v1/document-uploads` e `POST /v1/signature-processes` respondiam 403 (as regras só permitiam `client` e `admin`), então o formulário do portal falhava para operadores. O portal também não renovava o token: guardava só o `access_token` e, ao expirar, descartava a sessão e voltava ao login.
+
+Entregue:
+- `client`, `operator` e `admin` criam processo e enviam documento; `viewer` segue com 403 e não vê o botão (D-089, D-092).
+- Dono e ator: processo criado por pessoa não tem cliente dono (invisível a clientes de API), grava o usuário como ator `OPERATOR` no journal e usa Idempotency-Key escopada por usuário (D-090).
+- Portal renova o token com o refresh token (antes de expirar, em segundo plano e ao receber 401), sem perder a tela (D-091).
+
+Verificação:
+| Verificação | Resultado |
+|---|---|
+| Testes unitários (.NET) | 278 passando |
+| Testes de integração (.NET; inclui `HumanCreationTests`: matriz de papéis nos dois endpoints, ator, dono, idempotência, uploads) | 240 passando, 2 pulados (testes `Live*` sem credenciais) |
+| Testes do portal (renovação e papéis) | 102 passando; `npm run build` ok |
+| Smoke test contra `docker compose` (inclui criação com token de operator pelo caminho do portal, viewer 403, renovação por refresh token) | `SMOKE TEST PASSED` |
