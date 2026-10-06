@@ -153,7 +153,8 @@ public sealed class DocumentUploadService(IOrchestratorDb db, IArtifactStore sto
     public async Task<FieldError?> CheckAsync(string uploadId, CancellationToken ct)
     {
         var up = await db.Uploads.AsNoTracking().FirstOrDefaultAsync(u => u.Id == uploadId, ct);
-        var foreign = up?.ClientId is { } owner && caller?.ClientId is { } me && owner != me;
+        // A client only uses its own uploads; uploads made by people (no client) are for people only. People may use any upload.
+        var foreign = caller?.ClientId is { } me && up?.ClientId != me;
         if (up is null || foreign || clock.UtcNow - up.CreatedAt > Validity)
             return new FieldError("document.source.uploadId", "Unknown or expired upload");
         return null;

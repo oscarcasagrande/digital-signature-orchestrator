@@ -448,9 +448,9 @@ public class SignerConfirmationTests(TestFixture f)
         var asA = await api.SendAsync(Tokens.Req(HttpMethod.Post, "/v1/signature-processes", a, Body(Signer("Ana", type: "SIMPLE"), source: source), Guid.NewGuid().ToString()));
         asA.StatusCode.Should().Be(HttpStatusCode.Accepted);
 
-        var operatorToken = Tokens.Make("olga", ["operator"]);
+        var viewerToken = Tokens.Make("vera", ["viewer"]);
         var asOperator = new HttpRequestMessage(HttpMethod.Post, "/v1/document-uploads") { Content = new MultipartFormDataContent { { new ByteArrayContent([1]), "file", "x.pdf" } } };
-        asOperator.Headers.Authorization = new("Bearer", operatorToken);
+        asOperator.Headers.Authorization = new("Bearer", viewerToken);
         (await api.SendAsync(asOperator)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 

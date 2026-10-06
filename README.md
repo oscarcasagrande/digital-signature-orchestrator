@@ -157,7 +157,7 @@ Fora do MVP: WAF, KMS, secrets manager, circuit breaker/bulkhead, alertas (seç�
 
 **Progresso**: `progress { completedSteps, totalSteps, currentStep }` na listagem e no detalhe (com `steps`). Etapas: documento recebido, confirmação por signatário e canal, assinatura por signatário, documento final e, havendo callback, a entrega do callback de conclusão. Etapas canceladas ou com falha não contam.
 
-**Portal**: coluna *Etapas* (X/Y, barra e etapa atual ao passar o mouse), aba *Etapas* no detalhe e página *Novo processo* (`/processes/new`, upload e tabela de signatários; exige papel `client` ou `admin`).
+**Portal**: coluna *Etapas* (X/Y, barra e etapa atual ao passar o mouse), aba *Etapas* no detalhe e página *Novo processo* (`/processes/new`, upload e tabela de signatários; disponível para `client`, `operator` e `admin`, nunca para `viewer`).
 
 ## Providers reais em sandbox (spec 011)
 

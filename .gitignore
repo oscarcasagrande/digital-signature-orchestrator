@@ -7,7 +7,7 @@ dist/
 .env
 .claude/settings.local.json
 TestResults/
-.smoke-upload.pdf
+.smoke-*.pdf
 
 .env.*
 !.env.example

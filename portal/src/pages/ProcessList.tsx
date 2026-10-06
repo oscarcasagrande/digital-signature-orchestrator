@@ -6,6 +6,7 @@ import { Pagination } from '../components/Pagination';
 import { ProgressCell } from '../components/Progress';
 import { StatusBadge } from '../components/StatusBadge';
 import { useApi } from '../hooks/useApi';
+import { useOperator } from '../components/OperatorContext';
 import { BUSINESS_STATUSES, OPERATIONAL_STATUSES, formatDateTime } from '../util/format';
 
 export const PAGE_SIZE = 20;
@@ -13,6 +14,7 @@ export const AUTO_REFRESH_MS = 10_000;
 
 export function ProcessList() {
   const [params, setParams] = useSearchParams();
+  const { canCreateProcess } = useOperator();
   const status = params.get('status') ?? '';
   const operationalStatus = params.get('operationalStatus') ?? '';
   const q = params.get('q') ?? '';
@@ -49,7 +51,7 @@ export function ProcessList() {
     <section aria-labelledby="processes-title">
       <div className="page-head">
         <h1 id="processes-title">Signature processes</h1>
-        <Link to="/processes/new" className="button">Novo processo</Link>
+        {canCreateProcess && <Link to="/processes/new" className="button">Novo processo</Link>}
       </div>
 
       <form className="filters" role="search" onSubmit={onSearch}>

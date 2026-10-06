@@ -1,4 +1,4 @@
-import { getToken, notifyUnauthorized } from './auth';
+import { loadSession, notifyUnauthorized, refreshSession, validToken } from './auth';
 import type {
   ArtifactItem, CallbackDelivery, DeadLetter, DeadLetterParams, DownloadLink, JournalEvent, ListParams, OperationItem, Paged,
   NewProcessRequest, ProcessDetail, ProcessListItem, ProviderInfo, ReconcileResult, ReprocessResult, UploadedDocument,
@@ -45,12 +45,12 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown, extraHeaders: Record<string, string> = {}): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, extraHeaders: Record<string, string> = {}, retried = false): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json', ...extraHeaders };
   const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
   if (body !== undefined && !isForm) headers['Content-Type'] = 'application/json';
   const operator = getOperator();
-  const token = getToken();
+  const token = await validToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   else if (operator) headers['X-Operator-Id'] = operator;
 
@@ -60,7 +60,14 @@ async function request<T>(method: string, path: string, body?: unknown, extraHea
   } catch (e) {
     throw new ApiError(0, 'Network error', e instanceof Error ? e.message : 'The API is unreachable');
   }
-  if (res.status === 401) notifyUnauthorized();
+  if (res.status === 401) {
+    // The access token was refused (e.g. clock skew or revoked early): renew it once and replay the request before giving up.
+    if (!retried && token && loadSession()?.refreshToken) {
+      const renewed = await refreshSession().catch(() => null);
+      if (renewed) return request<T>(method, path, body, extraHeaders, true);
+    }
+    notifyUnauthorized();
+  }
   if (!res.ok) {
     let problem: { title?: string; detail?: string; errors?: Record<string, string[]>; correlationId?: string } = {};
     try {
