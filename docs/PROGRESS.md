@@ -15,7 +15,9 @@ Estado: **todas as specs (001 a 011) implementadas, verificadas e mescladas em `
 - [X] 010 Signatários, confirmação e progresso
 - [X] 011 Providers reais em sandbox
 
-Se o contexto reiniciar: ler este arquivo e docs/DECISIONS.md. Não há trabalho obrigatório pendente.
+Documentação: [PRD v2.0](PRD.md) (alinhado à solução implementada, com estado por seção, rastreabilidade e limitações) e [ARCHITECTURE.md](ARCHITECTURE.md) (detalhe técnico). Ver a seção "Revisão do PRD (v2.0)" ao final.
+
+Se o contexto reiniciar: ler este arquivo, docs/DECISIONS.md e a seção 54 do PRD (limitações e riscos). Não há trabalho obrigatório pendente.
 
 ---
 
@@ -42,7 +44,7 @@ Se o contexto reiniciar: ler este arquivo e docs/DECISIONS.md. Não há trabalho
 - **004 Callbacks**: entrega assíncrona assinada com HMAC-SHA256, callbacks registrados, proteção contra SSRF, retry independente do estado do processo.
 - **005 Identity proofing**: sessões e validações por capacidade com provider simulado, mascaramento de dados pessoais, retenção e remoção de evidências.
 - **006 Reconciliação básica**: worker periódico e reconciliação manual comparando estado interno e do provider, com histórico.
-- **007 Portal operacional**: lista com filtros, busca e paginação; detalhe com timeline e nove abas; operações manuais auditadas com a identidade do operador; página de dead letters; nginx com proxy.
+- **007 Portal operacional**: lista com filtros, busca e paginação; detalhe com timeline e dez abas (as nove do PRD mais *Etapas*, da spec 010); operações manuais auditadas com a identidade do operador; página de dead letters; nginx com proxy.
 - **008 Segurança e observabilidade**: OIDC com Keycloak (usuários e M2M), RBAC (viewer, operator, client, admin), segregação por cliente, ator de auditoria vindo do token, limite de criação por cliente, login no portal; OpenTelemetry (traces com propagação pelo outbox/RabbitMQ, métricas mínimas da seção 40, logs com TraceId/CorrelationId) exportado a um OpenTelemetry Collector com endpoint Prometheus.
 
 ## Critérios de aceite do MVP (PRD seção 49)
@@ -69,15 +71,15 @@ Se o contexto reiniciar: ler este arquivo e docs/DECISIONS.md. Não há trabalho
 ## Pendências e limites conhecidos
 
 - Fora do escopo por definição: fases 2 e 3 do PRD (seções 47 e 48) e seção 45.
-- Segurança: WAF, KMS, secrets manager e criptografia em repouso gerenciada ficam como infraestrutura externa (documentado no README). Os segredos do realm e do compose são apenas de demonstração. Callbacks registrados e sessões de identity proofing não são segregados por cliente (somente processos, listagens, dead letters e idempotência).
-- Portal: login por formulário (password grant) em vez de redirecionamento OIDC; token em `sessionStorage`.
+- Segurança: WAF, KMS, secrets manager e criptografia em repouso gerenciada ficam como infraestrutura externa (documentado no README). Os segredos do realm e do compose são apenas de demonstração. Callbacks registrados, sessões de identity proofing, dead letters, uploads e artefatos são segregados por cliente desde a spec 009 (D-067).
+- Portal: login por authorization code com PKCE (spec 009) e renovação do token por refresh token (D-091); tokens em `sessionStorage`; o logout não encerra a sessão no Keycloak.
 - Observabilidade: sem alertas (seção 41), sem dashboards prontos; traces e logs só no `debug` do coletor, métricas em Prometheus `:8889`. Circuit breaker e bulkhead continuam opcionais no MVP (obrigatórios na fase 2).
 - Definition of Done de produção (seção 50) que depende de ambiente real: testes de carga, caos e segurança dedicados e runbooks não fazem parte do MVP.
 - Docker Desktop caiu duas vezes no ambiente de desenvolvimento durante builds; foi reiniciado e os testes foram refeitos (sem impacto no código).
 
 ## Decisões tomadas
 
-Todas registradas em `docs/DECISIONS.md` (D-001 a D-088), por spec. Destaques: retenção de idempotência de 24 h; operações de proofing reutilizam a tabela `operation`; DLQ como tabela e mensagem `*-dlq`; evidências nunca baixáveis; reconciliação registra apenas correções e execuções manuais; `Auth:Enabled` configurável (desligado mantém `X-Operator-Id`); papéis via `realm_access.roles` e segregação por `azp`; propagação de trace pelo payload do outbox; Keycloak 25 e coletor OTel em compose.
+Todas registradas em `docs/DECISIONS.md` (D-001 a D-094), por spec. Destaques: retenção de idempotência de 24 h; operações de proofing reutilizam a tabela `operation`; DLQ como tabela e mensagem `*-dlq`; evidências nunca baixáveis; reconciliação registra apenas correções e execuções manuais; `Auth:Enabled` configurável (desligado mantém `X-Operator-Id`); papéis via `realm_access.roles` e segregação por `azp`; propagação de trace pelo payload do outbox; Keycloak 25 e coletor OTel em compose.
 
 ---
 
@@ -116,7 +118,7 @@ Verificação:
 | Testes do portal (Vitest) | 81 passando; `npm run build` ok |
 | Smoke test contra `docker compose` (inclui spec 010: upload, confirmação sequencial, progresso, ausência do código no journal, Swagger) | `SMOKE TEST PASSED` |
 
-Limites conhecidos: sem token de signatário (a aplicação consumidora repassa o código); uploads não consumidos não são removidos; falha permanente do notificador deixa a confirmação em envio até reprocessar a operação; operadores não criam processos (RBAC mantido), logo o formulário do portal exige papel `client` ou `admin`.
+Limites conhecidos: sem token de signatário (a aplicação consumidora repassa o código); uploads não consumidos não são removidos; falha permanente do notificador deixa a confirmação em envio até reprocessar a operação; operadores não criavam processos (RBAC mantido), logo o formulário do portal exigia papel `client` ou `admin` (superado: `operator` também cria, ver "Correção" abaixo e D-089).
 
 ---
 
@@ -156,3 +158,32 @@ Verificação:
 | Testes de integração (.NET; inclui `HumanCreationTests`: matriz de papéis nos dois endpoints, ator, dono, idempotência, uploads) | 240 passando, 2 pulados (testes `Live*` sem credenciais) |
 | Testes do portal (renovação e papéis) | 102 passando; `npm run build` ok |
 | Smoke test contra `docker compose` (inclui criação com token de operator pelo caminho do portal, viewer 403, renovação por refresh token) | `SMOKE TEST PASSED` |
+
+
+---
+
+# Revisão do PRD (v2.0) e ARCHITECTURE.md
+
+Entregue (em `main`, só documentação, sem alteração de código):
+- [PRD.md](PRD.md) v2.0 alinhado ao que o código faz. Numeração e títulos das seções 1 a 52 preservados; acrescentadas a 53 (rastreabilidade PRD ↔ specs ↔ decisões), a 54 (limitações conhecidas e riscos) e a 55 (documentos relacionados). Cada seção de requisito indica implementado, parcial ou planejado; contratos (endpoints, payloads, erros, estados, eventos, artefatos, capabilities, papéis) são os reais; critérios de aceite e Definition of Done indicam o teste automatizado que os cobre.
+- [ARCHITECTURE.md](ARCHITECTURE.md): projetos, modelo de dados, filas e DLQs, outbox e inbox, workers, configuração por variáveis de ambiente, serviços do docker-compose e portas.
+- `docs/DECISIONS.md`: D-093 (estrutura do PRD v2.0) e D-094 (o Worker consome as cinco filas; supersede parcialmente D-026).
+
+Onde o PRD v1.0 divergia do código, a v2.0 segue o código:
+- `output.destination` e a operação `OUTPUT_DELIVERY` nunca foram implementados.
+- `identityProofing.validations` no processo só é registrado; a validação roda em sessões de proofing independentes.
+- `FAILED`, `EXPIRED` e `SUSPENDED` existem nas máquinas de estado, mas nenhum fluxo leva até eles.
+- Não há circuit breaker nem bulkhead por fornecedor, políticas de identity proofing, alertas, revogação ou uso único de links de download.
+- O detalhe do processo tem dez abas, não nove.
+
+Verificação (reexecutada nesta revisão):
+| Verificação | Resultado |
+|---|---|
+| Testes unitários (.NET) | 278 passando |
+| Testes de integração (.NET, Postgres e RabbitMQ por Testcontainers) | 240 passando, 2 pulados (`Live*`, sem credenciais) |
+| Testes do portal (Vitest) | 102 passando |
+| Smoke test contra `docker compose` | não reexecutado; último resultado registrado acima (`SMOKE TEST PASSED`) |
+| Nomes de testes citados no PRD | os 88 `Classe.método` citados existem em `tests/` |
+| Links e âncoras de PRD.md e ARCHITECTURE.md | válidos; títulos 1 a 52 idênticos aos da v1.0 |
+
+Divergências de documentação encontradas e **não corrigidas** (fora do escopo desta revisão; listadas na seção 54 do PRD, item L-33): `README.md` (serviços do compose, número de abas, formulário de login), `specs/009` ("sem refresh token", superado por D-091) e o título do teste `ProcessDetail.test.tsx` ("nine tabs", que verifica dez abas).
